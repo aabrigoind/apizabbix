@@ -4,35 +4,42 @@ import uvicorn
 
 app = FastAPI(title="Zabbix to GLPI Bridge")
 
-# Definimos la estructura de los datos que Zabbix nos va a enviar
+# Esquema de validación para los parámetros HTTP POST enviados por Zabbix
 class ZabbixAlert(BaseModel):
-    host: str
-    severity: str
-    trigger_name: str
-    ip: str
-    status: str  # Por ejemplo: PROBLEM o RESOLVED
+    event_id: str      # Captura la macro {EVENT.ID}
+    status: str        # Captura la macro {EVENT.STATUS} (PROBLEM o RESOLVED)
+    message: str       # Captura la macro {ALERT.MESSAGE} (Bloque HTML)
 
 @app.post("/alertas")
 async def recibir_alerta(alerta: ZabbixAlert):
-    """
-    Este endpoint se queda escuchando en http://IP:8000/alertas
-    Zabbix enviará un POST aquí cuando ocurra un evento.
-    """
     try:
-        print("\n=== Nueva Alerta Recibida de Zabbix ===")
-        print(f"Host afectado: {alerta.host} ({alerta.ip})")
-        print(f"Gravedad: {alerta.severity}")
-        print(f"Problema: {alerta.trigger_name}")
-        print(f"Estado: {alerta.status}")
-        print("=======================================\n")
+        # Evaluación del estado del evento para determinar la acción en la mesa de ayuda
+        if alerta.status == "PROBLEM":
+            print(f"\n[ACCION: CREAR TICKET] ──> Evento ID: {alerta.event_id}")
+            print("--- Cuerpo del Requerimiento (HTML) ---")
+            print(alerta.message)
+            print("---------------------------------------\n")
+            
+            # TODO: Fase 2 - Inyectar lógica de inicialización de sesión y POST a GLPI (glpi_create_ticket)
+            
+        elif alerta.status == "RESOLVED":
+            print(f"\n[ACCION: CERRAR TICKET] ──> Vinculado al Evento ID: {alerta.event_id}")
+            print("--- Datos de Cierre y Recuperación ---")
+            print(alerta.message)
+            print("--------------------------------------\n")
+            
+            # TODO: Fase 2 - Inyectar lógica de búsqueda por ID y PUT a GLPI (glpi_close_ticket)
         
-        # TODO: Aquí irá la lógica para conectar con GLPI en el paso 2
-        
-        return {"status": "success", "message": "Alerta recibida correctamente"}
+        else:
+            # Manejo de contingencia si Zabbix envía un estado desconocido (ej. ACKNOWLEDGE)
+            print(f"\n[AVISO] Estado no mapeado recibido: {alerta.status} para Evento ID: {alerta.event_id}\n")
+            
+        return {"status": "success", "message": f"Evento {alerta.event_id} procesado en el bridge"}
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        # En caso de falla interna, se genera una respuesta HTTP 500 (Internal Server Error)
+        raise HTTPException(status_code=500, detail=f"Error interno en el bridge: {str(e)}")
 
 if __name__ == "__main__":
-    # Arranca el servidor en el puerto 8000
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    # Inicializa el servidor ASGI Uvicorn apuntando a este archivo específico (apizabbix)
+    uvicorn.run("apizabbix:app", host="0.0.0.0", port=8000, reload=False)
